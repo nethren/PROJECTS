@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Validate the personal-project portfolio without changing it."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+from urllib.parse import unquote
+
+
+STAGES = ("inbox", "backlog", "active", "archive")
+FULL_RECORD_FIELDS = (
+    "name",
+    "slug",
+    "type",
+    "status",
+    "visibility",
+    "local_path",
+    "remote_url",
+    "cloud_workspace",
+    "created",
+    "updated",
+)
+ABSENT_VALUES = {"", "null", "none", "not created", "not used"}
+LOCAL_ONLY_VALUE = "local-only"
+PLACEHOLDER_MARKERS = ("[", "yyyy-mm-dd")
+LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate portfolio records, links, paths, index coverage, and Git "
+            "boundaries. The command is read-only."
+        )
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(__file__).resolve().parent.parent,
+        help="workspace root (default: parent of this script's directory)",
+    )
+    return parser.parse_args()
+
+
+def strip_scalar(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1].strip()
+    return value
+
+
+def parse_front_matter(path: Path, errors: list[str]) -> tuple[dict[str, str], str]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        errors.append(f"{path}: missing opening front-matter delimiter")
+        return {}, text
+
+    try:
+        closing = next(
+            index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"
+        )
+    except StopIteration:
+        errors.append(f"{path}: missing closing front-matter delimiter")
+        return {}, text
+
+    fields: dict[str, str] = {}
+    for number, line in enumerate(lines[1:closing], start=2):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if ":" not in line:
+            errors.append(f"{path}:{number}: invalid front-matter line")
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if key in fields:
+            errors.append(f"{path}:{number}: duplicate field '{key}'")
+        fields[key] = strip_scalar(value)
+    return fields, "\n".join(lines[closing + 1 :])
+
+
+def is_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
+
+
+def section_body(body: str, heading: str) -> str | None:
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\s*$\n(.*?)(?=^##\s|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(body)
+    return match.group(1).strip() if match else None
+
+
+def load_local_paths(root: Path, errors: list[str]) -> dict[str, str]:
+    mapping_file = root / ".local" / "project-paths.json"
+    if not mapping_file.exists():
+        return {}
+    try:
+        data = json.loads(mapping_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"{mapping_file}: invalid JSON: {error}")
+        return {}
+
+    projects = data.get("projects") if isinstance(data, dict) else None
+    if not isinstance(projects, dict):
+        errors.append(f"{mapping_file}: 'projects' must be a JSON object")
+        return {}
+
+    local_paths: defaultdict[str, list[str]] = defaultdict(list)
+    result: dict[str, str] = {}
+    for slug, local_path in projects.items():
+        if not isinstance(slug, str) or not SLUG_RE.fullmatch(slug):
+            errors.append(f"{mapping_file}: invalid project slug '{slug}'")
+            continue
+        if not isinstance(local_path, str) or not Path(local_path).is_absolute():
+            errors.append(f"{mapping_file}: path for '{slug}' must be absolute")
+            continue
+        result[slug] = local_path
+        local_paths[local_path].append(slug)
+
+    for local_path, slugs in local_paths.items():
+        if len(slugs) > 1:
+            errors.append(
+                f"{mapping_file}: duplicate local path '{local_path}' for "
+                + ", ".join(sorted(slugs))
+            )
+    return result
+
+
+def validate_records(
+    root: Path, local_mapping: dict[str, str], errors: list[str]
+) -> list[Path]:
+    records: list[Path] = []
+    slugs: defaultdict[str, list[Path]] = defaultdict(list)
+    full_record_slugs: set[str] = set()
+
+    for stage in STAGES:
+        directory = root / stage
+        if not directory.is_dir():
+            errors.append(f"missing pipeline directory: {directory}")
+            continue
+
+        for record in sorted(directory.glob("*.md")):
+            records.append(record)
+            file_slug = record.stem
+            if not SLUG_RE.fullmatch(file_slug):
+                errors.append(f"{record}: filename must use lowercase kebab-case")
+
+            if stage == "inbox":
+                text = record.read_text(encoding="utf-8")
+                first_line = text.splitlines()[0].strip() if text.splitlines() else ""
+                if not first_line.startswith("# ") or first_line == "# [Idea title]":
+                    errors.append(f"{record}: inbox idea needs a title")
+                if not re.search(r"^- \*\*Captured:\*\* \d{4}-\d{2}-\d{2}$", text, re.MULTILINE):
+                    errors.append(f"{record}: inbox idea needs a YYYY-MM-DD captured date")
+                problem = section_body(text, "Problem or opportunity")
+                if not problem or is_placeholder(problem):
+                    errors.append(f"{record}: inbox idea needs a problem or opportunity")
+                slugs[file_slug].append(record)
+                continue
+
+            fields, body = parse_front_matter(record, errors)
+            for field in FULL_RECORD_FIELDS:
+                if field not in fields:
+                    errors.append(f"{record}: missing required field '{field}'")
+
+            record_slug = fields.get("slug", "")
+            if record_slug and record_slug != file_slug:
+                errors.append(
+                    f"{record}: front-matter slug '{record_slug}' does not match filename"
+                )
+            if record_slug and not SLUG_RE.fullmatch(record_slug):
+                errors.append(f"{record}: slug must use lowercase kebab-case")
+            effective_slug = record_slug or file_slug
+            slugs[effective_slug].append(record)
+            full_record_slugs.add(effective_slug)
+
+            status = fields.get("status", "")
+            if status and status != stage:
+                errors.append(
+                    f"{record}: status '{status}' does not match directory '{stage}'"
+                )
+
+            for field in FULL_RECORD_FIELDS:
+                value = fields.get(field, "")
+                if field not in {"remote_url", "cloud_workspace", "local_path"}:
+                    if not value or is_placeholder(value):
+                        errors.append(f"{record}: field '{field}' is empty or a placeholder")
+
+            local_path = fields.get("local_path", "").strip()
+            if local_path.lower() == LOCAL_ONLY_VALUE:
+                if effective_slug not in local_mapping:
+                    errors.append(
+                        f"{record}: local-only path missing from ignored "
+                        ".local/project-paths.json"
+                    )
+            elif local_path.lower() not in ABSENT_VALUES:
+                errors.append(
+                    f"{record}: tracked local_path must be 'local-only' or null; "
+                    "put absolute paths in .local/project-paths.json"
+                )
+
+            if stage == "active":
+                next_action = section_body(body, "Next action")
+                if not next_action or is_placeholder(next_action):
+                    errors.append(f"{record}: active record needs a concrete next action")
+
+    for slug, paths in slugs.items():
+        if len(paths) > 1:
+            joined = ", ".join(str(path) for path in paths)
+            errors.append(f"duplicate slug '{slug}': {joined}")
+    for slug in sorted(set(local_mapping) - full_record_slugs):
+        errors.append(
+            f".local/project-paths.json: slug '{slug}' has no canonical project record"
+        )
+    return records
+
+
+def validate_links(root: Path, errors: list[str]) -> None:
+    for document in sorted(root.rglob("*.md")):
+        if ".git" in document.parts:
+            continue
+        text = document.read_text(encoding="utf-8")
+        for raw_target in LINK_RE.findall(text):
+            target = raw_target.strip().split(maxsplit=1)[0].strip("<>")
+            if target.startswith(("https://", "http://", "mailto:", "#")):
+                continue
+            target = unquote(target.split("#", 1)[0].split("?", 1)[0])
+            if not target:
+                continue
+            resolved = (document.parent / target).resolve()
+            if not resolved.exists():
+                errors.append(f"{document}: broken relative link '{raw_target}'")
+
+
+def validate_index(root: Path, records: list[Path], errors: list[str]) -> None:
+    index = root / "PROJECTS.md"
+    if not index.is_file():
+        errors.append(f"missing portfolio index: {index}")
+        return
+    index_text = index.read_text(encoding="utf-8")
+    for record in records:
+        if record.parent.name == "inbox":
+            continue
+        relative = record.relative_to(root).as_posix()
+        if relative not in index_text:
+            errors.append(f"{index}: missing link to canonical record '{relative}'")
+
+
+def validate_git_boundaries(root: Path, errors: list[str]) -> None:
+    if not (root / ".git").exists():
+        errors.append(f"workspace root is not a Git repository: {root}")
+    for candidate in root.rglob(".git"):
+        if candidate == root / ".git":
+            continue
+        errors.append(f"nested Git boundary found: {candidate}")
+
+
+def main() -> int:
+    args = parse_args()
+    root = args.root.expanduser().resolve()
+    if not root.is_dir():
+        print(f"error: workspace root does not exist: {root}", file=sys.stderr)
+        return 2
+
+    errors: list[str] = []
+    local_mapping = load_local_paths(root, errors)
+    records = validate_records(root, local_mapping, errors)
+    validate_links(root, errors)
+    validate_index(root, records, errors)
+    validate_git_boundaries(root, errors)
+
+    if errors:
+        print(f"Workspace check failed with {len(errors)} error(s):", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+
+    print(f"Workspace check passed: {len(records)} record(s), no errors.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

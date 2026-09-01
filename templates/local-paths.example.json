@@ -1,0 +1,6 @@
+{
+  "workspace_root": "/absolute/path/to/control-repository",
+  "projects": {
+    "example-project": "/absolute/path/to/example-project"
+  }
+}

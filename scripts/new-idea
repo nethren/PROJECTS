@@ -1,0 +1,91 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/new-idea [--root PATH] <slug>
+
+Create a dated idea record at inbox/<slug>.md from templates/idea.md.
+The slug must use lowercase kebab-case. Existing files are never overwritten.
+
+Options:
+  --root PATH  Use a workspace root other than the script's parent directory.
+  -h, --help   Show this help text.
+EOF
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+if [ "${1:-}" = "--root" ]; then
+  if [ "$#" -lt 2 ]; then
+    echo "error: --root requires a path" >&2
+    usage >&2
+    exit 2
+  fi
+  workspace_root=$2
+  shift 2
+fi
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+if [ "$#" -ne 1 ]; then
+  usage >&2
+  exit 2
+fi
+
+slug=$1
+case "$slug" in
+  ""|*[!a-z0-9-]*|-*|*-|*--*)
+    echo "error: invalid slug '$slug'; use lowercase kebab-case" >&2
+    exit 2
+    ;;
+esac
+
+template="$workspace_root/templates/idea.md"
+inbox="$workspace_root/inbox"
+destination="$inbox/$slug.md"
+
+if [ ! -f "$template" ]; then
+  echo "error: idea template not found: $template" >&2
+  exit 1
+fi
+
+if [ ! -d "$inbox" ]; then
+  echo "error: inbox directory not found: $inbox" >&2
+  exit 1
+fi
+
+if [ -e "$destination" ]; then
+  echo "error: idea already exists: $destination" >&2
+  exit 1
+fi
+
+display_name=$(printf '%s' "$slug" | tr '-' ' ')
+captured_date=$(date '+%Y-%m-%d')
+temporary=$(mktemp "$inbox/.new-idea.XXXXXX")
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+
+awk -v title="$display_name" -v captured="$captured_date" '
+  $0 == "# [Idea title]" { print "# " title; next }
+  $0 == "- **Captured:** YYYY-MM-DD" {
+    print "- **Captured:** " captured
+    next
+  }
+  { print }
+' "$template" > "$temporary"
+
+if ! ln "$temporary" "$destination" 2>/dev/null; then
+  echo "error: idea already exists or could not be created: $destination" >&2
+  exit 1
+fi
+
+rm -f "$temporary"
+trap - EXIT HUP INT TERM
+printf 'Created %s\n' "$destination"

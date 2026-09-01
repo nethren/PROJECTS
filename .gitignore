@@ -1,0 +1,12 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+.env
+.env.*
+!.env.example
+scratch/
+__pycache__/
+*.py[cod]
+/.local/
