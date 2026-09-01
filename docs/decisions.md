@@ -43,6 +43,8 @@ belong in the project repository.
 - **Decision:** Publish the control repository as a public GitHub portfolio
   under the `nethren` account with the repository name `PROJECTS` and the MIT
   license.
+- **Result:** Created [nethren/PROJECTS](https://github.com/nethren/PROJECTS)
+  with public visibility and `main` as its default branch.
 - **Decision:** Tracked records use `local_path: local-only`. Absolute paths live
   in ignored `.local/project-paths.json`, keyed by project slug.
 - **Reason:** Git viewers should see project outcomes and source links without
@@ -59,7 +61,6 @@ belong in the project repository.
 
 ## Decisions still required
 
-- GitHub authentication for the `nethren` account.
 - Backup expectations beyond the public GitHub remote.
 - Preferred package managers and runtimes, chosen per project unless a genuine
   cross-project default emerges.
