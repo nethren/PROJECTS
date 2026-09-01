@@ -7,9 +7,9 @@ matters, its current state, and where the work can be found.
 ## Portfolio
 
 Browse the curated [`PROJECTS.md`](PROJECTS.md) index for project outcomes,
-status, next steps, and links to code or live work. There are no registered
-projects yet; new entries will appear there as they are approved for the
-portfolio.
+status, next steps, and links to code or live work. The first featured project,
+[Token Economist](https://github.com/nethren/token-economist), is a design-time
+cost and quality preview for AI product features.
 
 Each software project remains independently usable and versioned. Its source,
 technical documentation, history, and project-specific instructions live in its

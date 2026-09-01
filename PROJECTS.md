@@ -9,7 +9,4 @@ are updated together so this page stays concise and trustworthy.
 
 | Project | Type | Status | Next action | Local | Remote/cloud | Updated |
 |---|---|---|---|---|---|---|
-
-No projects are registered yet. The first approved project will replace this
-message with a portfolio entry focused on its outcome rather than internal
-implementation detail.
+| [Token Economist](active/token-economist.md) | Software | Active | Add CI and evaluate a safe static demo | Mapped privately | [GitHub](https://github.com/nethren/token-economist) | 2026-09-01 |
