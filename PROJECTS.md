@@ -10,3 +10,4 @@ are updated together so this page stays concise and trustworthy.
 | Project | Type | Status | Next action | Local | Remote/cloud | Updated |
 |---|---|---|---|---|---|---|
 | [Token Economist](active/token-economist.md) | Software | Active | Add CI and evaluate a safe static demo | Mapped privately | [GitHub](https://github.com/nethren/token-economist) | 2026-09-01 |
+| [APIFit](active/apifit.md) | Software | Active | Choose hosting and verify the public deployment | Mapped privately | [GitHub](https://github.com/nethren/apifit) | 2026-09-17 |

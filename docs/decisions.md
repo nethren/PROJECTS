@@ -59,6 +59,17 @@ belong in the project repository.
   root `README.md` and `AGENTS.md` must be complete because this control
   repository's instructions do not apply to sibling repositories.
 
+## 2026-09-17 — APIFit publication and release boundary
+
+- **Decision:** Publish APIFit as its own public MIT-licensed repository,
+  [nethren/apifit](https://github.com/nethren/apifit), following the independent
+  project and private local-path conventions used for Token Economist.
+- **Decision:** Remove Postman integration from APIFit's scope. The owner handles
+  the demo and chose a public app with paid AI available within the existing
+  shared allowance; no new budget or actual hosting deployment was authorized.
+- **Result:** APIFit is the second active portfolio project. Application source,
+  implementation plans and detailed release evidence remain in that repository.
+
 ## Decisions still required
 
 - Backup expectations beyond the public GitHub remote.
